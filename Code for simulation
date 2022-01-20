@@ -1,0 +1,468 @@
+
+#Data generation
+# 64 electrode, 2828 time points, 24+24 repeat
+library(simts)
+electrode<-64
+time<-seq(1/500,by=1/500,length.out=2828)
+Time<-2828
+label=c(rep(0,24),rep(1,24))
+#group1: just gaussian white noise
+
+group1<-NULL
+for (i in 1:24) {
+  channel<-matrix(nrow = electrode,ncol = Time)
+  for (ele in 1:electrode) {
+    set.seed(ele*i)
+    channel[ele,]<-4*sin(2*pi*3*time)+5*sin(2*pi*5*time)+rnorm(Time)
+  }
+  group1<-cbind(group1,channel)
+}
+
+#group2: add sin wave on several electrodes between time=500~1000
+
+group2<-NULL
+for (i in 1:24) {
+  channel<-matrix(nrow = electrode,ncol = Time)
+  for (ele in 1:electrode) {
+    set.seed(ele*i)
+    channel[ele,]<-4*sin(2*pi*3*time)+5*sin(2*pi*5*time)+rnorm(Time)
+  }
+  channel[3,c(500:1000)]<-channel[3,c(500:1000)]+3*cos(2*pi*8*time[500:1000])
+  channel[5,c(500:1000)]<-channel[5,c(500:1000)]+3*cos(2*pi*8*time[500:1000])
+  channel[12,c(500:1000)]<-channel[12,c(500:1000)]+3*cos(2*pi*8*time[500:1000])
+    #channel[3, ]<-channel[20, ]+3*cos(2*pi*8*time )
+    #channel[5, ]<-channel[20, ]+3*cos(2*pi*8*time )
+    #channel[12, ]<-channel[20, ]+3*cos(2*pi*8*time )
+  group2<-cbind(group2,channel)
+}
+
+#Combine two group
+Comb<-cbind(group1,group2) #64*135744
+d1<-t(Comb)   #135744*64
+colnames(d1) <- paste0("channel",c(1:64))
+label<-matrix(c(rep(0,24*2828),rep(1,24*2828)),ncol=1)
+colnames(label) <- c('label')
+time<-as.data.frame(rep(seq(1/500,by=1/500,length.out=2828),48))
+colnames(time) = c('time')
+data <- cbind(time, label, d1)
+group1 <- subset(data, label == 0)
+group2<- subset(data, label == 1)
+Comb<-rbind(group1,group2) #135744*66
+
+#plot#######
+# ma<-data.frame(a=group2$channel3[1:2828],b=group1$channel3[1:2828])
+# a<-analyze.wavelet(ma,"b",loess.span = 0,dt = 1/500, dj = 1/20,lowerPeriod = 1/10,upperPeriod = 1/2, make.pval = TRUE, n.sim = 10)
+# wt.image(a, color.key = "quantile", n.levels = 20,legend.params = list(lab = "wavelet power levels", mar = 4.7))
+
+
+
+#####################Start analysis#################
+epoch <- 2828 
+aa1 <- dim(Comb)[1]/epoch #48
+aa <- seq(1,by=epoch,length.out=aa1) #action 
+bb <- seq(3, by=1, length.out = 64) #channel
+
+##Generate name matrix###
+name_group1 <- matrix(paste0(rep(paste0(rep(c('group1'), 64),  rep(c("_channel"), 64),c(1:64)), 
+                                 24), "_obs",  rep(c(1:24), each = 64)), nrow = 24, byrow = TRUE)
+name_group2 <- matrix(paste0(rep(paste0(rep(c('group2'), 64),  rep(c("_channel"), 64), c(1:64)), 
+                                 24), "_obs",  rep(c(1:24), each = 64)), nrow = 24, byrow = TRUE)
+nameComb<-rbind(name_group1,name_group2)
+
+
+
+
+######morlet transformation########
+#set.seed(2021)
+library(WaveletComp)
+w.plot.power <- function(data, row, col){
+    i <- aa[row] # row=1,2,...,48, aa[row] denotes the order of row in data
+    j <- bb[col] # col=1,2,...,64 order of electrode
+    out.wave <- WaveletTransform(as.vector(data[i:(i + 2827), j]),dt=1/500,dj=1/20) 
+    freq4=sqrt(out.wave$Power[120,])
+    freq8=sqrt(out.wave$Power[100,])
+    freq30=sqrt(out.wave$Power[62,])
+    output = list(freq8=freq8,freq4=freq4,freq30=freq30)
+    return(invisible(output))
+}
+
+#seperate 3 freq signal for 64 channels
+# 3 features,   i=1,...48, j=1,...64;
+s <- function(obs,ele){
+  
+  #row denotes the order of row in data48, col denotes order of electrode64
+  data <-  w.plot.power(data = Comb, row = obs, col = ele)
+  
+  comb1 <- cbind(data$freq30,data$freq8,data$freq4) 
+  
+  cols<- paste0(nameComb[obs, ele], "_", c("freq30","freq8","freq4"))
+  
+  feature <- comb1
+  
+  colnames(feature) <- cols
+  
+  #rownames(feature) <- deparse(substitute(data)) #using the name of dataframe as the row name
+  
+  feature #2828**3
+  
+}
+
+
+#generate dataframe for 1 person:48 matrices 2828*768
+
+#column name of each observation
+name_rhy <- rep(c("freq30","freq8","freq4"),64)
+name_ele <- rep(paste0("channel",c(1:64)),each=3)
+name_obs <- matrix(paste0(name_ele,"_",name_rhy),nrow=1)
+
+
+
+#import the data
+set.seed(1)
+tf.data<-list()
+for (obs in 1:48) {
+  tf.data[[obs]]<-matrix(0,nrow = 2828, ncol = 64*3)
+  for (ele in 1:64) {
+    tf.data[[obs]][,c((3*(ele-1)+1):(3*ele))]<-s(obs,ele)
+  }
+}
+
+
+#generate list with 192 elements: 2828*48
+
+newdata<-list()
+for (i in 1:192) {
+  newdata[[i]]<-matrix(0,nrow = 2828, ncol = 48)
+  for (j in 1:48) {
+    newdata[[i]][,j]<-tf.data[[j]][,i]
+  }
+}
+names(newdata) <- as.vector(name_obs)  
+
+
+
+############################### feature selection #######################
+label=c(rep(0,24),rep(1,24))
+pvalue<-NULL
+for (i in 1:192) {
+  fanova<-fanova.tests(x =newdata[[i]], label, test = "GPF",parallel = FALSE, nslaves = NULL,
+                       params=list(paramFP = list(B.FP = 1000, basis = "b-spline",norder = 3)))
+  pvalue[i]<-fanova$GPF$pvalueGPF
+}
+select.fanova<-which(pvalue<=0.01)
+name_obs[select.fanova]
+
+
+
+############################# pMFLR #########################
+Data<-newdata
+label<-c(rep(0,24),rep(1,24))
+#Time<-c(1:2828)/2828
+Time<-seq(1/500,by=1/500,length.out=2828)
+select<-select.fanova
+name_select<-name_obs[select]
+Select<-Data[select]
+for (i in 1:length(Select)) {
+  Select[[i]]<-t(Select[[i]])
+}
+index<-c(1:length(Select))
+
+knots <- seq(0,1,length.out=300)
+norder <- 4
+nbasis <- length(knots) + norder - 2
+T <- Time
+Trange = c(0,max(Time))
+lambda=1e6
+n<-48
+
+#Create b-spline basis
+bbasisV <- create.bspline.basis(rangeval=Trange,nbasis=nbasis,norder=norder)
+curv.Lfd <- int2Lfd(2) #typical for smoothing a cubic spline (order 4),  penalize the squared acceleration
+curv.fdParV <- fdPar(bbasisV, curv.Lfd,lambda) #Define A Functional Parameter Object
+
+#choose smoothing parameter
+lambdas = 10^seq(-12,5,by=0.5)
+mean.gcv = rep(0,length(lambdas))
+
+#Initialize dataframes
+SmoothV <- NULL
+SmoothVfd <-NULL
+A <- NULL
+for(j in 1:length(Select)){
+  for(ilam in 1:length(lambdas)){
+    # Set lambda
+    curv.fdParVi <- curv.fdParV
+    curv.fdParVi$lambda <- lambdas[ilam]
+    # Smooth
+    Smoothi <- smooth.basis(T,t(Select[[j]]),curv.fdParVi)
+    # Record average gcv
+    mean.gcv[ilam] <- mean(Smoothi$gcv)
+  }
+  #plot(lambdas,mean.gcv,type='b',log='x')
+  best = which.min(mean.gcv)
+  lambdabest = lambdas[best]
+  curv.fdParV$lambda = lambdabest
+  bj = smooth.basis(T,t(Select[[j]]),curv.fdParV)
+  SmoothV[[j]] <-bj
+  #Create A matrices
+  c <- SmoothV[[j]]$fd
+  SmoothVfd[[j]] <- c
+  d <- SmoothVfd[[j]]$coef
+  A[[j]] <- t(d)
+}
+
+#Create PSI matrix
+Psi1 <- inprod(bbasisV,bbasisV)
+e<- NULL
+APsi <- NULL
+#multiply Am by Psim
+for(i in 1:length(Select)){
+  e <- A[[i]]%*%Psi1
+  APsi[[i]] <- e
+}
+
+
+
+#Perform PCA in APsi matrices
+##################################################
+eigen_value<-NULL
+eigen_vector<-NULL
+for(i in 1:length(Select)){
+  h <- eigen(cor(APsi[[i]]))
+  eigen_value[[i]]<-h$value
+  eigen_vector[[i]]<-h$vector
+}
+
+#Calculate proportion of variance and choose number of PCs
+PropVar <- NULL
+d<-NULL
+e<-NULL
+for ( j in 1:length(Select)){
+  for( i in 1:length(eigen_value[[j]])){
+    d[i] <- eigen_value[[j]][i]/sum(eigen_value[[j]])
+  }
+  e <- cumsum(d)
+  PropVar[[j]] <- e
+}
+NPCV <- NULL
+NPC <- NULL
+for(j in 1:length(Select)){
+  d <- NULL
+  for(i in 1:length(Select)){
+    if(PropVar[[j]][i] < 0.95){
+      d[i] <- 1
+    }
+    else{ d[i] <- 0}
+  }
+  NPCV[[j]]<-d
+  NPC[j] <- sum(NPCV[[j]])
+}
+
+#Select # PCs
+min(NPC)
+max(NPC)
+table(NPC)
+numPC <-6# mode 
+
+PC <- NULL
+for(i in 1:length(Select)){
+  d <- eigen_vector[[i]][,1:numPC]
+  PC[[i]]<-APsi[[i]]%*%d
+}
+
+
+replicate <- 300
+TP<-rep(0,replicate )
+FN<-rep(0,replicate )
+FP<-rep(0,replicate )
+TN<-rep(0,replicate )
+Acc<-rep(0,replicate )
+auc<-rep(0,replicate )
+SE<-rep(0,replicate )
+
+
+
+#traning and validation
+for (m in 1:replicate ) {
+  
+  
+  set.seed(m)
+  index<-sample(1:48,36,replace = FALSE)
+  samp<-c(sample(index,270, replace=TRUE),sample(c(1:48)[-index],30, replace=TRUE))
+  Y<-rep(0,300)
+  for (a in 1:300) {
+    Y[a]<-label[samp[a]]
+  }
+  n1<-0.9*300
+  train <- samp[1:n1]
+  valid <- samp[-(1:n1)]
+  #valid <- NULL
+  #for(i in 1:n){
+  #  if (i %in% train){}
+  #  else{
+  #    valid <- rbind(valid,i)
+  #  }
+  #}
+  PCtrain <- NULL
+  PCvalid <- NULL
+  x<- NULL
+  
+  a <- NULL
+  #Training Design
+  for(j in 1:length(Select)){
+    a <- NULL
+    x <- NULL
+    for(i in 1:n1){
+      a <- PC[[j]][train[i],]
+      x<-rbind(x,a)
+    }
+    PCtrain[[j]]<-x
+  }
+  
+  #Validation Design
+  for(j in 1:length(Select)){
+    a <- NULL
+    x <- NULL
+    for(i in 1:(30)){
+      a <- PC[[j]][valid[i],]
+      x<-rbind(x,a)
+    }
+    PCvalid[[j]]<-x
+  }
+  
+  #Training Y
+  Ytrain <- NULL
+  for(i in 1:n1){
+    Ytrain[i] <- Y[train[i]]
+  }
+  
+  #Valid Y
+  Yvalid <- NULL
+  for(i in 1:(30)){
+    Yvalid[i] <- Y[valid[i]]
+  }
+  
+  #grp***
+  library(robustHD)
+  library(grplasso)
+  library(calibrate)
+  
+  #########Validaton Set as Validation
+  
+  Int <- ones(n1,1)
+  lasX<-NULL
+  lasX<-cbind(lasX,Int)
+  for(i in 1:length(Select)){
+    lasX <- cbind(lasX,PCtrain[[i]])
+  }
+  index <- NULL
+  index <- c(index,NA)
+  for(i in 1:length(Select)){
+    b <-rep(i,numPC)
+    index <- c(index,b)
+  }
+  
+  
+  #############grplasso##################
+  lambdalas <- lambdamax(lasX, y=Ytrain, index=index, penscale = sqrt, model = LogReg()) * 0.5^(0:10)
+  lasfit <- grplasso(lasX, y=Ytrain, index= index, lambda = lambdalas, model= LogReg(), penscale=sqrt, control = grpl.control(update.hess = "lambda", trace=0))
+  Coefs <- lasfit$coefficients
+  dim(Coefs)
+  # Check the model
+  # as.integer(rowMeans(larsfit$fitted.values)-Ytrain) Correct
+  
+  CoSUM <- NULL
+  for(i in 1:dim(Coefs)[2]){
+    CoSUM[i]<-sum(Coefs[2:(length(Select)*numPC + 1),i])
+  }
+  CoCo <- NULL
+  VarNUM <- NULL
+  for(j in 1:dim(Coefs)[2]){
+    g <- NULL
+    for(i in 1:(numPC*length(Select) + 1)){
+      if(Coefs[i,j] ==0){
+        g[i] <- 0}
+      else{g[i] <- 1}
+    }
+    CoCo[[j]]<-g
+  }
+  SumCoCo <- NULL
+  for(i in 1:dim(Coefs)[2]){
+    SumCoCo[i] <- sum(CoCo[[i]][-1])
+  }
+  
+  
+  #View number of functional variables selected by grplasso
+  #SumCoCo
+  
+  #Find Lihat and Pihat and classify yhat
+  ModelCoef <- Coefs[,2]
+  Alpha <- ModelCoef[1]
+  Betastar <- ModelCoef[2:(numPC*length(Select) +1)]
+  Betastar <- t(Betastar)
+  Betastar <- t(Betastar)
+  M<-NULL
+  for(i in 1:length(Select)){
+    b <- PCvalid[[i]]%*%Betastar[(numPC*(i-1)+1):(numPC*i)]
+    M[[i]] <- b
+  }
+  
+  APsiB <- 0*ones((30),1)
+  for(i in 1:length(Select)){
+    APsiB <- APsiB + M[[i]]
+  }
+  
+  
+  #Find Lhat
+  Lhatvalid <- NULL
+  Lhatvalid = Alpha*ones((30),1) + APsiB
+  
+  
+  #Pistar1
+  #find Pi(i)??s
+  Pstar <- NULL
+  YstarV <- NULL
+  SEV<-NULL
+  for (i in 1:(30)){
+    if(Lhatvalid[i]>700){
+      Pstar[[i]]<-1
+    }
+    else{
+      Pstar[[i]] <- (exp(Lhatvalid[i]))/(exp(Lhatvalid[i])+1)
+    }
+    if(Pstar[[i]]>=0.6){
+      YstarV[[i]] <- 1
+    }
+    else{YstarV[[i]]<- 0}
+    SEV[[i]]<-(Pstar[[i]]-Yvalid[[i]])^2
+  }
+  
+  a<-Yvalid
+  df<-data.frame(a=a,p=unlist(Pstar))
+  odf<-df[order(df$a),]
+  if(abs(mean(unlist(Yvalid)-unlist(YstarV)))<10^(-4)){
+    auc[m]<-1
+  }else{
+    roc_obj<-roc(odf$a,odf$p)
+    auc[m]<-auc(roc_obj)
+  }
+  
+  TP[m]<-(length(which(YstarV==1 & Yvalid== 1)))/(length(which(YstarV==1 & Yvalid== 1))+length(which(YstarV==0 & Yvalid== 1))) 
+  FN[m]<-(length(which(YstarV==0 & Yvalid== 1)))/(length(which(YstarV==1 & Yvalid== 1))+length(which(YstarV==0 & Yvalid== 1))) 
+  FP[m]<-(length(which(YstarV==1 & Yvalid== 0)))/(length(which(YstarV==1 & Yvalid== 0))+length(which(YstarV==0 & Yvalid== 0))) 
+  TN[m]<-(length(which(YstarV==0 & Yvalid== 0)))/(length(which(YstarV==1 & Yvalid== 0))+length(which(YstarV==0 & Yvalid== 0)))
+  Acc[m]<-length(which(YstarV==Yvalid))/30
+  SE[m]<-mean(SEV)
+  
+}
+
+
+#record the feature selected after penalty term
+feat<-rep(0,length(Select))
+for (f in 1:length(Select)) {
+  feat[f]<-sum(CoCo[[dim(Coefs)[2]]][(numPC*(f-1)+2):(numPC*f+1)])
+}
+select.fanova[which(feat!=0)]
+name_obs[select.fanova[which(feat!=0)]]
+
+
