@@ -14,29 +14,8 @@ library(spectral)
 library(pROC)
 
 
-#Generate the list to save the path of dataset
-individual<-list()
-
-#Generate result list 
-
-# feature selection
-feature.select<-list()
-
-# 4 measurement
-totalTP<-matrix(0,nrow = 19, ncol=300)
-totalFN<-matrix(0,nrow = 19, ncol=300)
-totalFP<-matrix(0,nrow = 19, ncol=300)
-totalTN<-matrix(0,nrow = 19, ncol=300)
-totalAcc<-matrix(0,nrow = 19, ncol=300)
-totalauc<-matrix(0,nrow = 19, ncol=300)
-totalSEV<-matrix(0,nrow = 19, ncol=300)
-
-
-for (ind in 1:19) {
 
 ####import the dataset from 1 to 19
-  #data1<- readMat(individual[[1]][1]) #data1<- readMat(individual[[ind]][1])
-  #dis_label <- readMat(individual[[1]][2]) #dis_label <- readMat(individual[[ind]][2])
   data1<- readMat(individual[[ind]][1])
   dis_label <- readMat(individual[[ind]][2])
 
@@ -99,16 +78,12 @@ nameComb<-rbind(nameLong,nameShort)
 
 ######morlet transformation########
 #set.seed(2021)
+library(WaveletComp)
 w.plot.power <- function(data, row, col){
-  sqrt({
     i <- aa[row] # row=1,2,...,48, aa[row] denotes the order of row in data
     j <- bb[col] # col=1,2,...,64 order of electrode
-    
-    out.wave <- morlet(x1 = as.vector(data[i:(i + 2827), 1]),  
-                       y1 = as.vector(eegfilter(data[i:(i + 2827), j], upper = 64, Fs = 500)),
-                       p2=6,dj = 0.15, siglvl = 0.95)
-  }$Power)
-  
+    out.wave <- WaveletTransform(as.vector(data[i:(i + 2827), j]),dt=1/500,dj=1/20) 
+    sqrt(t(out.wave$Power))
 }
 
 #seperate gamma beta alpha theta and delta for 64 channels
@@ -117,9 +92,9 @@ s <- function(obs,ele){
   
   #row denotes the order of row in data48, col denotes order of electrode64
   data <-  w.plot.power(data = Comb, row = obs, col = ele)
-  
-  comb1 <- cbind((data[,sample(c(1:4), 3)]),(data[,sample(c(5:8), 3)]),(data[,sample(c(9:12), 3)]), 
-                 (data[,sample(c(13:30), 3)])) #(delta,theta,alpha,beta)
+  set.seed(1)
+  comb1 <- cbind((data[,sample(c(117:160), 3)]),(data[,sample(c(98:116), 3)]),(data[,sample(c(86:97), 3)]), 
+                 (data[,sample(c(20:85), 3)])) #(delta,theta,alpha,beta)
   
   cols<- paste0(nameComb[obs, ele], "_", rep(c("delta","theta","alpha","beta"),each=3))
   
@@ -160,6 +135,16 @@ for (i in 1:768) {
   }
 }
 names(newdata) <- as.vector(name_obs)  
+
+
+library(WaveletComp)
+ma<-data.frame(a=Long$F7[1:2828],b=Short$F7[1:2828])
+par(mfrow=c(1,1))
+a<-analyze.wavelet(ma,"a",loess.span = 0,dt = 1/500, dj = 1/30,lowerPeriod = 1/30,upperPeriod = 1, make.pval = TRUE, n.sim = 10)
+wt.image(a, color.key = "quantile", n.levels = 20,legend.params = list(lab = "wavelet power levels"),main="Long$F7")
+b<-analyze.wavelet(ma,"b",loess.span = 0,dt = 1/500, dj = 1/30,lowerPeriod = 1/30,upperPeriod = 1, make.pval = TRUE, n.sim = 10)
+wt.image(b, color.key = "quantile", n.levels = 20,legend.params = list(lab = "wavelet power levels"),main="Short$F7")
+
 
 ############################### feature selection #######################
 
@@ -283,7 +268,7 @@ for(j in 1:length(Select)){
 min(NPC)
 max(NPC)
 table(NPC)
-numPC <-min(max(NPC),9) # mode 
+numPC <-max(NPC) # mode 
 
 PC <- NULL
 for(i in 1:length(Select)){
@@ -291,15 +276,6 @@ for(i in 1:length(Select)){
   PC[[i]]<-APsi[[i]]%*%d
 }
 
-
-n <- 300
-TP<-rep(0,n)
-FN<-rep(0,n)
-FP<-rep(0,n)
-TN<-rep(0,n)
-Acc<-rep(0,n)
-auc<-rep(0,n)
-SE<-rep(0,n)
 
 
 
@@ -475,13 +451,3 @@ for (m in 1:n) {
   SE[m]<-mean(SEV)
   
 }
-
-totalTP[ind,]<-TP
-totalFN[ind,]<-FN
-totalFP[ind,]<-FP
-totalTN[ind,]<-TN
-totalAcc[ind,]<-Acc
-totalauc[ind,]<-auc
-totalSEV[ind,]<-SE
-}
-
